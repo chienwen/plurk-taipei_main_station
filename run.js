@@ -119,15 +119,7 @@ const taskRouter = {
                     return train.EndingStationID != SETTINGS.TRA_STATION_ID;
                 }
             });
-            const timeTablePromises = [];
-            trains.forEach((train) => {
-                timeTablePromises.push(new Promise((resolve, reject) => {
-                    ptx.getTimeTableTRA(train.TrainNo, (timeTable) => {
-                        resolve(timeTable);
-                    })
-                }));
-            });
-            Promise.all(timeTablePromises).then((timeTables) => {
+            ptx.getTimeTablesTRA((timeTables) => {
                 // Inject StopTimes
                 timeTables.forEach((timeTable) => {
                     for (let i = 0; i < trains.length; i++) {
