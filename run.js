@@ -104,6 +104,26 @@ function getTsFromCST(hh_mm) {
     return (new Date(t.getUTCFullYear() + '-' + twoDigits(t.getUTCMonth() + 1) + '-' + twoDigits(t.getUTCDate()) + 'T' + hh_mm + ':00+08:00')).getTime();
 }
 
+function postPlurkRailwayNews(newsItems, header) {
+    dedupPost.init();
+    newsItems.forEach((newsItem) => {
+        let content = header + "\n";
+        if (newsItem.url) {
+            content += newsItem.url + ' (' + newsItem.title.replace(/\(/g, '（').replace(/\)/g, '）') + ')';
+        } else {
+            content += newsItem.title + "\n" + newsItem.description;
+        }
+        if (content.length > SETTINGS.PLURK_MAX_CHARS) {
+            content = content.substr(0, SETTINGS.PLURK_MAX_CHARS - 3) + '...';
+        }
+        if (!dedupPost.wasPosted(content)) {
+            dedupPost.add(content);
+            postPlurk(content, 'shares');
+        }
+    });
+    dedupPost.finish();
+}
+
 const taskRouter = {
     all: function() {
         Object.keys(this).filter(task => task !== 'all').forEach((task) => {
@@ -170,6 +190,9 @@ const taskRouter = {
                 }
             });
         });
+        ptx.getNewsTRA((newsItems) => {
+            postPlurkRailwayNews(newsItems, emojiDict.train + " 臺鐵新聞");
+        });
     },
     thsr: function() {
         ptx.getLiveStatusTHSR(SETTINGS.TRA_STATION_ID, (data) => {
@@ -196,20 +219,7 @@ const taskRouter = {
             }
         });
         ptx.getNewsTHSR((newsItems) => {
-            dedupPost.init();
-            newsItems.forEach((newsItems) => {
-                let content = emojiDict.hsTrain + " 高鐵新聞\n";
-                if (newsItems.url) {
-                    content += newsItems.url + ' (' + newsItems.title.replace(/\(/g, '（').replace(/\)/g, '）') + ')';
-                } else {
-                    content += newsItems.title + "\n" + newsItems.description;
-                }
-                if (!dedupPost.wasPosted(content)) {
-                    dedupPost.add(content);
-                    postPlurk(content, 'shares');
-                }
-            });
-            dedupPost.finish();
+            postPlurkRailwayNews(newsItems, emojiDict.hsTrain + " 高鐵新聞");
         });
     },
     clean: function() {
