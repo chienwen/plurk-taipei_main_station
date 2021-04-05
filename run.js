@@ -1,13 +1,16 @@
 const tsNow = (new Date()).getTime();
 const ptx = require('./lib/ptx');
+const util = require('util');
 //const logError = require('./lib/logError');
 
 const SETTINGS = {
     PLURK_MAX_CHARS: 360,
     TRA_STATION_ID: 1000, // Taipei Main Station
+    THSR_WATCH_WINDOW_MINUTES: 30,
 };
 
 const emojiDict = {
+    hsTrain: '🚄',
     train: '🚆',
     up: '⬆️',
     down: '⬇️',
@@ -86,6 +89,12 @@ function timeToDisplay(hour, minute) {
     return twoDigits(hour) + ':' + twoDigits(minute);
 }
 
+function getTsFromCST(hh_mm) {
+    const t = new Date(tsNow + 3600000 * 8);
+    // YYYY-MM-DDThh:mm:ss[.mmm]TZD
+    return (new Date(t.getUTCFullYear() + '-' + twoDigits(t.getUTCMonth() + 1) + '-' + twoDigits(t.getUTCDate()) + 'T' + hh_mm + ':00+08:00')).getTime();
+}
+
 const taskRouter = {
     all: function() {
         Object.keys(this).filter(task => task !== 'all').forEach((task) => {
@@ -95,7 +104,14 @@ const taskRouter = {
     },
     tra: function() {
         ptx.getLiveStatusTRA(SETTINGS.TRA_STATION_ID, (data) => {
-            const trains = data.StationLiveBoards;
+            const trains = data.StationLiveBoards.filter((train) => {
+                if (SETTINGS.TRA_STATION_ID == '1000' && train.EndingStationID == '1001') { // 台北站環島線特殊情況
+                    let t = new Date(tsNow + 3600000 * 8);
+                    return t.getUTCHours() < 12;
+                } else {
+                    return train.EndingStationID != SETTINGS.TRA_STATION_ID;
+                }
+            });
             const timeTablePromises = [];
             trains.forEach((train) => {
                 timeTablePromises.push(new Promise((resolve, reject) => {
@@ -119,19 +135,22 @@ const taskRouter = {
                 trains.sort((a, b) => {
                     return b.ScheduleDepartureTime.localeCompare(a.ScheduleDepartureTime)
                 });
+                //console.log(util.inspect(trains, {showHidden: false, depth: null}))
+
                 const traStatusMapping = ['準點', '誤點', '取消'];
                 const traTripLineMapping = ['不經山海線', '山線', '海線', '成追線'];
                 const annocements = trains.map((train) => {
-                    let words = [train.ScheduleDepartureTime.substr(0,5), emojiDict.train, train.TrainNo, '次', train.TrainTypeName.Zh_tw];
-                    if (train.TripLine) {
-                        words.push(traTripLineMapping[train.TripLine]);
-                    }
-                    words = words.concat([train.Direction ? emojiDict.down : emojiDict.up, '開往', train.EndingStationName.Zh_tw]);
-                    words.push(emojiDict.statusLights[train.RunningStatus] + '**' + traStatusMapping[train.RunningStatus] + '**')
+                    let words = [emojiDict.train + (train.Direction ? emojiDict.down : emojiDict.up), train.ScheduleDepartureTime.substr(0,5)];
+                    words.push(emojiDict.statusLights[train.RunningStatus] + traStatusMapping[train.RunningStatus])
                     if (train.DelayTime) {
                         words.push(`慢${train.DelayTime}分`);
                     }
-                    if (train.StopTimes && train.StopTimes.length > 0) {
+                    words = words.concat([train.TrainNo, '次', train.TrainTypeName.Zh_tw]);
+                    if (train.TripLine) {
+                        words.push(traTripLineMapping[train.TripLine]);
+                    }
+                    words = words.concat(['開往', train.EndingStationName.Zh_tw]);
+                    if (train.StopTimes && train.StopTimes.length > 1) {
                         words.push('沿途停靠');
                         let skip = true;
                         const viaStationNames = [];
@@ -148,12 +167,32 @@ const taskRouter = {
                     }
                     return words.join(' ');
                 });
-                console.log(annocements);
+                //console.log(annocements);
                 postPlurkWithTime(annocements, 'wishes');
             });
         });
     },
     thsr: function() {
+        ptx.getLiveStatusTHSR(SETTINGS.TRA_STATION_ID, (data) => {
+            const trains = data.AvailableSeats.filter((train) => {
+                const diff = getTsFromCST(train.DepartureTime) - tsNow;
+                return diff >= 0 && diff < 60000 * SETTINGS.THSR_WATCH_WINDOW_MINUTES;
+            });
+            trains.sort((a, b) => {
+                return b.DepartureTime.localeCompare(a.DepartureTime)
+            });
+            const annocements = trains.map((train) => {
+                let words = [emojiDict.hsTrain + (train.Direction ? emojiDict.down : emojiDict.up), train.DepartureTime, '高鐵', train.TrainNo, '次', '開往', train.EndingStationName.Zh_tw];
+                if (train.StopStations && train.StopStations.length > 1) {
+                    words.push('沿途停靠');
+                    words.push(train.StopStations.map((station) => {
+                        return station.StationName.Zh_tw;
+                    }).join('→'));
+                }
+                return words.join(' ');
+            });
+            postPlurkWithTime(annocements, 'wishes');
+        });
     },
     clean: function() {
         plurk.callAPI('/APP/Timeline/getPlurks', {
