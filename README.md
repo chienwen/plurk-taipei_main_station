@@ -1,0 +1,17 @@
+With `config.ini`
+
+```
+PLURK_CONSUMER_KEY=
+PLURK_CONSUMER_SECRET=
+PLURK_OAUTH_ACCESS_TOKEN=
+PLURK_OAUTH_ACCESS_TOKEN_SECRET=
+
+TW_MOTC_PTX_APP_ID=
+TW_MOTC_PTX_APP_KEY=
+```
+
+Run
+
+```
+npm run plurk all|tra|thsr|clean [debug]
+```
