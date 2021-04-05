@@ -1,6 +1,7 @@
 const tsNow = (new Date()).getTime();
 const ptx = require('./lib/ptx');
 const util = require('util');
+const dedupPost = require('./lib/dedupPost');
 //const logError = require('./lib/logError');
 
 const SETTINGS = {
@@ -10,6 +11,7 @@ const SETTINGS = {
 };
 
 const emojiDict = {
+    'new': '🆕',
     hsTrain: '🚄',
     train: '🚆',
     up: '⬆️',
@@ -192,6 +194,22 @@ const taskRouter = {
             for (let i = 0; i < annocementsTypes.length; i++) {
                 postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.hsTrain + '高鐵', (i ? emojiDict.up : emojiDict.down) + (i ? '北上' : '南下'), '即將出發'].join(' '));
             }
+        });
+        ptx.getNewsTHSR((newsItems) => {
+            dedupPost.init();
+            newsItems.forEach((newsItems) => {
+                let content = emojiDict.hsTrain + " 高鐵新聞\n";
+                if (newsItems.url) {
+                    content += newsItems.url + ' (' + newsItems.title.replace(/\(/g, '（').replace(/\)/g, '）') + ')';
+                } else {
+                    content += newsItems.title + "\n" + newsItems.description;
+                }
+                if (!dedupPost.wasPosted(content)) {
+                    dedupPost.add(content);
+                    postPlurk(content, 'shares');
+                }
+            });
+            dedupPost.finish();
         });
     },
     clean: function() {
