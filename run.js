@@ -11,6 +11,8 @@ const SETTINGS = {
 };
 
 const emojiDict = {
+    anticlockwise: '🔄',
+    clockwise: '🔁',
     'new': '🆕',
     hsTrain: '🚄',
     train: '🚆',
@@ -186,7 +188,7 @@ const taskRouter = {
                     annocementsTypes[train.Direction].push(words.join(' '));
                 });
                 for (let i = 0; i < annocementsTypes.length; i++) {
-                    postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.train + '臺鐵', (i ? emojiDict.down : emojiDict.up) + (i ? '逆行' : '順行'), '即將出發'].join(' '));
+                    postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.train + '臺鐵', (i ? emojiDict.anticlockwise : emojiDict.clockwise) + (i ? '逆行' : '順行'), '即將出發'].join(' '));
                 }
             });
         });
