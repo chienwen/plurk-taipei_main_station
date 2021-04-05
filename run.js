@@ -54,11 +54,18 @@ function postPlurk(content, qualifier) {
     });
 }
 
-function postPlurkWithTime(annocements, qualifier) {
+function postPlurkWithTime(annocements, qualifier, header) {
     if (annocements.length == 0) {
         return;
     }
-    let str = '';
+    const getHeader = () => {
+        if (header) {
+            return header + "\n";
+        } else {
+            return '';
+        }
+    };
+    let str = getHeader();
     const toPlurkStrings = [];
     while(annocements.length > 0) {
         let nextAnnocement = annocements.pop();
@@ -66,7 +73,7 @@ function postPlurkWithTime(annocements, qualifier) {
             str += nextAnnocement + "\n";
         } else {
             toPlurkStrings.push(str);
-            str = '';
+            str = getHeader();
         }
     }
     if (str) {
@@ -139,13 +146,10 @@ const taskRouter = {
 
                 const traStatusMapping = ['準點', '誤點', '取消'];
                 const traTripLineMapping = ['不經山海線', '山線', '海線', '成追線'];
-                const annocements = trains.map((train) => {
-                    let words = [emojiDict.train + (train.Direction ? emojiDict.down : emojiDict.up), train.ScheduleDepartureTime.substr(0,5)];
-                    words.push(emojiDict.statusLights[train.RunningStatus] + traStatusMapping[train.RunningStatus])
-                    if (train.DelayTime) {
-                        words.push(`慢${train.DelayTime}分`);
-                    }
-                    words = words.concat([train.TrainNo, '次', train.TrainTypeName.Zh_tw]);
+                const annocementsTypes = [[], []];
+                trains.forEach((train) => {
+                    let words = [emojiDict.statusLights[train.RunningStatus], train.ScheduleDepartureTime.substr(0,5), traStatusMapping[train.RunningStatus] + (train.DelayTime ? `${train.DelayTime}分` : '')];
+                    words = words.concat([train.TrainNo + '次', train.TrainTypeName.Zh_tw]);
                     if (train.TripLine) {
                         words.push(traTripLineMapping[train.TripLine]);
                     }
@@ -165,10 +169,11 @@ const taskRouter = {
                         });
                         words.push(viaStationNames.join('→'));
                     }
-                    return words.join(' ');
+                    annocementsTypes[train.Direction].push(words.join(' '));
                 });
-                //console.log(annocements);
-                postPlurkWithTime(annocements, 'wishes');
+                for (let i = 0; i < annocementsTypes.length; i++) {
+                    postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.train + '臺鐵', (i ? emojiDict.down : emojiDict.up) + (i ? '逆行' : '順行'), '即將出發'].join(' '));
+                }
             });
         });
     },
@@ -181,17 +186,20 @@ const taskRouter = {
             trains.sort((a, b) => {
                 return b.DepartureTime.localeCompare(a.DepartureTime)
             });
-            const annocements = trains.map((train) => {
-                let words = [emojiDict.hsTrain + (train.Direction ? emojiDict.down : emojiDict.up), train.DepartureTime, '高鐵', train.TrainNo, '次', '開往', train.EndingStationName.Zh_tw];
+            const annocementsTypes = [[], []];
+            trains.forEach((train) => {
+                let words = [train.DepartureTime, '車次', train.TrainNo, '開往', train.EndingStationName.Zh_tw];
                 if (train.StopStations && train.StopStations.length > 1) {
                     words.push('沿途停靠');
                     words.push(train.StopStations.map((station) => {
                         return station.StationName.Zh_tw;
                     }).join('→'));
                 }
-                return words.join(' ');
+                annocementsTypes[train.Direction].push(words.join(' '));
             });
-            postPlurkWithTime(annocements, 'wishes');
+            for (let i = 0; i < annocementsTypes.length; i++) {
+                postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.hsTrain + '高鐵', (i ? emojiDict.up : emojiDict.down) + (i ? '北上' : '南下'), '即將出發'].join(' '));
+            }
         });
     },
     clean: function() {
