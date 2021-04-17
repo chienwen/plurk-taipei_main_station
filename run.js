@@ -30,12 +30,18 @@ let plurk = require('./lib/plurk');
 const IS_DEBUG = process.argv.length === 4 && process.argv[3] === 'debug';
 if (IS_DEBUG) {
     plurk = {
-        callAPI: (url, param, cb) => {
-            cb(null, {
-                plurk_id: 'DEBUG',
-                qualifier_translated: param.qualifier,
-                content: param.content
-            });
+        realPlurk: plurk,
+        callAPI: function(url, param, cb) {
+            if (url === '/APP/Timeline/getPlurks') {
+                this.realPlurk.callAPI(url, param, cb);
+            } else {
+                console.log("Mocked plurk is used");
+                cb(null, {
+                    plurk_id: 'DEBUG',
+                    qualifier_translated: param.qualifier,
+                    content: param.content
+                });
+            }
         }
     };
 }
