@@ -231,31 +231,63 @@ const taskRouter = {
         });
     },
     clean: function() {
-        plurk.callAPI('/APP/Timeline/getPlurks', {
-            offset: (new Date(tsNow - 86400000)).toISOString().split('.')[0]
-        }, (err, data) => {
-            if (err) {
-                console.log('ERROR', err);
-            } else {
-                if (data.plurks) {
-                    data.plurks.forEach((pl) => {
-                        const id = pl.plurk_id;
-                        if (IS_DEBUG) {
-                            console.log('DEBUG', 'will delete plurk id', id);
-                        } else {
-                            plurk.callAPI('/APP/Timeline/plurkDelete', {
-                                plurk_id: id
-                            }, (err, data) => {
-                                console.log("ok, deleted", id, data);
-                            });
+        const allPlurks = [];
+        async function getAndDeleteAllplurks() {
+            function getPlurks(tsOlderThan) {
+                return new Promise((resolve, reject) => {
+                    plurk.callAPI('/APP/Timeline/getPlurks', {
+                        offset: (new Date(tsOlderThan)).toISOString().split('.')[0],
+                        limit: 30, // max is actually 30
+                    }, (err, data) => {
+                        if (!err) {
+                            resolve(data);
                         }
                     });
-                }
-                else {
-                    console.log('Nothing to delete');
+                });
+            }
+            function deletePlurkPromise(plurk_id) {
+                return new Promise((resolve, reject) => {
+                    if (IS_DEBUG) {
+                        console.log('DEBUG', 'will delete plurk id', plurk_id);
+                        resolve();
+                    } else {
+                        plurk.callAPI('/APP/Timeline/plurkDelete', {
+                            plurk_id
+                        }, (err, data) => {
+                            console.log("ok, deleted", plurk_id, data);
+                            resolve();
+                        });
+                    }
+                });
+            }
+            let tsOlderThan = tsNow - 86400000;
+            let plurksToDelete = [];
+            while (true) {
+                console.log('fetch older than', (new Date(tsOlderThan)).toISOString());
+                let data = await getPlurks(tsOlderThan);
+                if (data.plurks.length > 0) {
+                    data.plurks.forEach((plurk) => {
+                        tsOlderThan = Math.min(tsOlderThan, (new Date(plurk.posted)).getTime());
+                    });
+                    plurksToDelete = plurksToDelete.concat(data.plurks);
+                } else {
+                    break;
                 }
             }
-        });
+            if (plurksToDelete.length > 0) {
+                console.log('fetched', plurksToDelete.length, 'plurks to delete');
+                const toDeletePlurkPromises = [];
+                plurksToDelete.forEach((plurk) => {
+                    toDeletePlurkPromises.push(deletePlurkPromise(plurk.plurk_id));
+                });
+                Promise.all(toDeletePlurkPromises).then(() => {
+                    console.log('All deleted');
+                });
+            } else {
+                console.log('Nothing to delete');
+            }
+        }
+        getAndDeleteAllplurks();
     },
 };
 
