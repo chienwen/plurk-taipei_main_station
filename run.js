@@ -1,5 +1,5 @@
 const tsNow = (new Date()).getTime();
-const ptx = require('./lib/ptx');
+const tdx = require('./lib/tdx');
 const util = require('util');
 const dedupPost = require('./lib/dedupPost');
 //const logError = require('./lib/logError');
@@ -132,6 +132,53 @@ function postPlurkRailwayNews(newsItems, header) {
     dedupPost.finish();
 }
 
+function getTRAAnnocements(trains, timeTables) {
+    // Inject StopTimes
+    timeTables.forEach((timeTable) => {
+        for (let i = 0; i < trains.length; i++) {
+            let train = trains[i];
+            if (train.TrainNo === timeTable.TrainInfo.TrainNo) {
+                train.StopTimes = timeTable.StopTimes;
+                break;
+            }
+        }
+    });
+    // Generate annocements
+    trains.sort((a, b) => {
+        return b.ScheduleDepartureTime.localeCompare(a.ScheduleDepartureTime)
+    });
+    //console.log(util.inspect(trains, {showHidden: false, depth: null}))
+
+    const traStatusMapping = ['準點', '誤點', '取消'];
+    const traTripLineMapping = ['不經山海線', '山線', '海線', '成追線'];
+    const annocementsTypes = [[], []];
+    trains.forEach((train) => {
+        let words = [emojiDict.statusLights[train.RunningStatus], train.ScheduleDepartureTime.substr(0,5), traStatusMapping[train.RunningStatus] + (train.DelayTime ? `${train.DelayTime}分` : '')];
+        words = words.concat([train.TrainNo + '次', train.TrainTypeName.Zh_tw]);
+        if (train.TripLine) {
+            words.push(traTripLineMapping[train.TripLine]);
+        }
+        words = words.concat(['開往', train.EndingStationName.Zh_tw]);
+        if (train.StopTimes && train.StopTimes.length > 1) {
+            words.push('沿途停靠');
+            let skip = true;
+            const viaStationNames = [];
+            train.StopTimes.forEach((station) => {
+                if (skip) {
+                    if (station.StationID == SETTINGS.TRA_STATION_ID) {
+                        skip = false;
+                    }
+                } else {
+                    viaStationNames.push(station.StationName.Zh_tw);
+                }
+            });
+            words.push(viaStationNames.join('→'));
+        }
+        annocementsTypes[train.Direction].push(words.join(' '));
+    });
+    return annocementsTypes;
+}
+
 const taskRouter = {
     all: function() {
         Object.keys(this).filter(task => task !== 'all').forEach((task) => {
@@ -140,94 +187,60 @@ const taskRouter = {
         });
     },
     tra: function() {
-        ptx.getLiveStatusTRA(SETTINGS.TRA_STATION_ID, (data) => {
-            const trains = data.StationLiveBoards.filter((train) => {
-                if (SETTINGS.TRA_STATION_ID == '1000' && train.EndingStationID == '1001') { // 台北站環島線特殊情況
-                    let t = new Date(tsNow + 3600000 * 8);
-                    return t.getUTCHours() < 12;
-                } else {
-                    return train.EndingStationID != SETTINGS.TRA_STATION_ID;
-                }
-            });
-            ptx.getTimeTablesTRA((timeTables) => {
-                // Inject StopTimes
-                timeTables.forEach((timeTable) => {
-                    for (let i = 0; i < trains.length; i++) {
-                        let train = trains[i];
-                        if (train.TrainNo === timeTable.TrainInfo.TrainNo) {
-                            train.StopTimes = timeTable.StopTimes;
-                            break;
-                        }
+        tdx.makeSureToken().then(() => {
+            Promise.all([
+                tdx.getLiveStatusTRA(SETTINGS.TRA_STATION_ID),
+                tdx.getTimeTablesTRA(),
+                tdx.getNewsTRA(),
+            ]).then(results => {
+                const trains = results[0].StationLiveBoards.filter((train) => {
+                    if (SETTINGS.TRA_STATION_ID == '1000' && train.EndingStationID == '1001') { // 台北站環島線特殊情況
+                        let t = new Date(tsNow + 3600000 * 8);
+                        return t.getUTCHours() < 12;
+                    } else {
+                        return train.EndingStationID != SETTINGS.TRA_STATION_ID;
                     }
                 });
-                // Generate annocements
-                trains.sort((a, b) => {
-                    return b.ScheduleDepartureTime.localeCompare(a.ScheduleDepartureTime)
+                const timeTables = results[1];
+                const annocementsTypes = getTRAAnnocements(trains, timeTables);
+                for (let i = 0; i < annocementsTypes.length; i++) {
+                    postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.train + '臺鐵', (i ? emojiDict.anticlockwise : emojiDict.clockwise) + (i ? '逆行' : '順行'), '即將出發'].join(' '));
+                }
+                const newsItems = results[2];
+                postPlurkRailwayNews(newsItems, emojiDict.train + " 臺鐵新聞");
+            });
+        });
+    },
+    thsr: function() {
+        tdx.makeSureToken().then(() => {
+            Promise.all([
+                tdx.getLiveStatusTHSR(SETTINGS.TRA_STATION_ID),
+                tdx.getNewsTHSR()
+            ]).then((results) => {
+                const trains = results[0].AvailableSeats.filter((train) => {
+                    const diff = getTsFromCST(train.DepartureTime) - tsNow;
+                    return diff >= 0 && diff < 60000 * SETTINGS.THSR_WATCH_WINDOW_MINUTES;
                 });
-                //console.log(util.inspect(trains, {showHidden: false, depth: null}))
-
-                const traStatusMapping = ['準點', '誤點', '取消'];
-                const traTripLineMapping = ['不經山海線', '山線', '海線', '成追線'];
+                trains.sort((a, b) => {
+                    return b.DepartureTime.localeCompare(a.DepartureTime)
+                });
                 const annocementsTypes = [[], []];
                 trains.forEach((train) => {
-                    let words = [emojiDict.statusLights[train.RunningStatus], train.ScheduleDepartureTime.substr(0,5), traStatusMapping[train.RunningStatus] + (train.DelayTime ? `${train.DelayTime}分` : '')];
-                    words = words.concat([train.TrainNo + '次', train.TrainTypeName.Zh_tw]);
-                    if (train.TripLine) {
-                        words.push(traTripLineMapping[train.TripLine]);
-                    }
-                    words = words.concat(['開往', train.EndingStationName.Zh_tw]);
-                    if (train.StopTimes && train.StopTimes.length > 1) {
+                    let words = [train.DepartureTime, '車次', train.TrainNo, '開往', train.EndingStationName.Zh_tw];
+                    if (train.StopStations && train.StopStations.length > 1) {
                         words.push('沿途停靠');
-                        let skip = true;
-                        const viaStationNames = [];
-                        train.StopTimes.forEach((station) => {
-                            if (skip) {
-                                if (station.StationID == SETTINGS.TRA_STATION_ID) {
-                                    skip = false;
-                                }
-                            } else {
-                                viaStationNames.push(station.StationName.Zh_tw);
-                            }
-                        });
-                        words.push(viaStationNames.join('→'));
+                        words.push(train.StopStations.map((station) => {
+                            return station.StationName.Zh_tw;
+                        }).join('→'));
                     }
                     annocementsTypes[train.Direction].push(words.join(' '));
                 });
                 for (let i = 0; i < annocementsTypes.length; i++) {
-                    postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.train + '臺鐵', (i ? emojiDict.anticlockwise : emojiDict.clockwise) + (i ? '逆行' : '順行'), '即將出發'].join(' '));
+                    postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.hsTrain + '高鐵', (i ? emojiDict.up : emojiDict.down) + (i ? '北上' : '南下'), '即將出發'].join(' '));
                 }
+                const newsItems = results[1];
+                postPlurkRailwayNews(newsItems, emojiDict.hsTrain + " 高鐵新聞");
             });
-        });
-        ptx.getNewsTRA((newsItems) => {
-            postPlurkRailwayNews(newsItems, emojiDict.train + " 臺鐵新聞");
-        });
-    },
-    thsr: function() {
-        ptx.getLiveStatusTHSR(SETTINGS.TRA_STATION_ID, (data) => {
-            const trains = data.AvailableSeats.filter((train) => {
-                const diff = getTsFromCST(train.DepartureTime) - tsNow;
-                return diff >= 0 && diff < 60000 * SETTINGS.THSR_WATCH_WINDOW_MINUTES;
-            });
-            trains.sort((a, b) => {
-                return b.DepartureTime.localeCompare(a.DepartureTime)
-            });
-            const annocementsTypes = [[], []];
-            trains.forEach((train) => {
-                let words = [train.DepartureTime, '車次', train.TrainNo, '開往', train.EndingStationName.Zh_tw];
-                if (train.StopStations && train.StopStations.length > 1) {
-                    words.push('沿途停靠');
-                    words.push(train.StopStations.map((station) => {
-                        return station.StationName.Zh_tw;
-                    }).join('→'));
-                }
-                annocementsTypes[train.Direction].push(words.join(' '));
-            });
-            for (let i = 0; i < annocementsTypes.length; i++) {
-                postPlurkWithTime(annocementsTypes[i], 'wishes', [emojiDict.hsTrain + '高鐵', (i ? emojiDict.up : emojiDict.down) + (i ? '北上' : '南下'), '即將出發'].join(' '));
-            }
-        });
-        ptx.getNewsTHSR((newsItems) => {
-            postPlurkRailwayNews(newsItems, emojiDict.hsTrain + " 高鐵新聞");
         });
     },
     clean: function() {
